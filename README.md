@@ -25,5 +25,5 @@ Code parsing assets to faciliate collaboration and transfers:
   * **Lexical Scope Protection:** Features two-phase variables tracking alongside built-in Web-API whitelist checks to accurately surface scope leaks and global variable mutations across deeply nested callback contexts.
   * **Layout Serializer Repair:** Includes proprietary sample post-processing multi-line regular expressions to capture structural formatting shifts introduced by HTML re-serialization, keeping delicate inline spans visually perfect in the browser (to be extended to fit additional needs).
 * Similar tools:
-  * **HTML cleaner:** Reads `app.html`, cleans up mixed space/tab indentation and other formatting issues and writes `app_clean.html`.
-  * **HTML separator (`separator.py`) :** Separates app.html into structural HTML (`app_pure_structure.html`) and JS code (`extracted_code.js`) and writes a comprehensive architectural report (`js_analysis.txt`).
+  * **HTML cleaner (`html_cleaner.py`):** Reads `app.html`, cleans up mixed space/tab indentation and other formatting issues and writes `app_clean.html`.
+  * **HTML separator (`separator.py`):** Separates app.html into structural HTML (`app_pure_structure.html`) and JS code (`extracted_code.js`) and writes a comprehensive architectural report (`js_analysis.txt`).
