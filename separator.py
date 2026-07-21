@@ -14,27 +14,27 @@ def analyze_and_separate_assets(input_file, output_js_file="extracted_code.js", 
 
     soup = BeautifulSoup(html_content, 'html.parser')
     
-    # 1. Alle JavaScript-Inhalte in korrekter Reihenfolge sammeln
+    # 1. Collect all JavaScript parts in their order of appearance
     js_blocks = []
     for script_tag in soup.find_all('script'):
         if script_tag.string and script_tag.string.strip():
             js_blocks.append(script_tag.string)
-            # Optional: Skript-Inhalt aus dem HTML löschen, um es komplett zu trennen
+            # Optional: remove scripts from HTML
             script_tag.string = "/* JS EXTRACTED TO EXTERNAL FILE */"
 
     combined_js = "\n\n/* --- NEXT SCRIPT BLOCK --- */\n\n".join(js_blocks)
 
-    # Das bereinigte HTML ohne eingebettetes JS speichern
+    # Save clean HTML without embedded JS
     with open("app_pure_structure.html", 'w', encoding='utf-8') as html_f:
         html_f.write(str(soup))
         
-    # Das reine JS separat speichern
+    # Save JS part separately
     with open(output_js_file, 'w', encoding='utf-8') as js_f:
         js_f.write(combined_js)
 
-    # 2. AST-Analyse des kombinierten JavaScripts mittels Esprima
+    # 2. Perform AST analysis of the JavaScript part using Esprima
     try:
-        # Erzeugt einen abstrakten Syntaxbaum (AST) des Codes
+        # Create abstract syntax tree (AST) of the code
         tree = esprima.parseScript(combined_js, {'loc': True})
     except Exception as e:
         print(f"Error parsing JavaScript AST: {e}")
@@ -43,7 +43,7 @@ def analyze_and_separate_assets(input_file, output_js_file="extracted_code.js", 
 
     extracted_elements = []
 
-    # Hilfsfunktion, um zu prüfen, ob eine Funktion ein Return-Statement besitzt
+    # Helper function to check if a function has a return statement
     def has_return(node):
         found_return = [False]
         def walk_for_return(n):
@@ -60,9 +60,9 @@ def analyze_and_separate_assets(input_file, output_js_file="extracted_code.js", 
         walk_for_return(node)
         return found_return[0]
 
-    # Den Syntaxbaum auf der obersten Ebene (globale Ebene) durchlaufen
+    # Parse the AST'S top level (global)
     for node in tree.body:
-        # A) Globale Variablen deklariert über var, let, const
+        # A) Global sariables declared using var, let, const
         if node.type == 'VariableDeclaration':
             for decl in node.declarations:
                 if decl.id.type == 'Identifier':
@@ -72,10 +72,10 @@ def analyze_and_separate_assets(input_file, output_js_file="extracted_code.js", 
                         'type': 'Variable',
                         'line': line_num,
                         'name': var_name,
-                        'kind': node.kind  # let, const, oder var
+                        'kind': node.kind  # let, const, or var
                     })
 
-        # B) Klassische Funktionsdeklarationen: function name(args) { ... }
+        # B) Classic function declarations: function name(args) { ... }
         elif node.type == 'FunctionDeclaration':
             func_name = node.id.name if node.id else "Anonymous"
             params = [param.name for param in node.params if param.type == 'Identifier']
@@ -90,7 +90,7 @@ def analyze_and_separate_assets(input_file, output_js_file="extracted_code.js", 
                 'output': "Yes (returns value)" if returns_value else "No (void)"
             })
 
-        # C) Sonderfall: Globale Funktionen, die als Variablen zugewiesen wurden (z.B. const myFunc = () => {})
+        # C) Special case: global functions, assigned as variables (e.g. const myFunc = () => {})
         elif node.type == 'VariableDeclaration':
             for decl in node.declarations:
                 if decl.init and decl.init.type in ['FunctionExpression', 'ArrowFunctionExpression']:
@@ -107,7 +107,7 @@ def analyze_and_separate_assets(input_file, output_js_file="extracted_code.js", 
                         'output': "Yes (returns value)" if returns_value else "No (void)"
                     })
 
-    # 3. Sortierung nach Auftreten (Zeilennummer) garantieren und Report schreiben
+    # 3. Enforce sorting by line number and write report
     extracted_elements.sort(key=lambda x: x['line'])
 
     with open(report_file, 'w', encoding='utf-8') as rep_f:
