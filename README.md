@@ -20,6 +20,7 @@ Code parsing assets to faciliate collaboration and transfers:
     -c          Count and output classes only
     -g          Track global variable mutations inside scopes
     -e          Extract JS and HTML to separate external assets
+    --clean     Clean & pretty-print the HTML (jsbeautifier + CSS tidy + prettify, like html_cleaner.py); writes <input_file>_clean.html
   ```
   * **Structural Isolation (`-e`):** Uses an Abstract Syntax Tree (AST) engine via `BeautifulSoup` and `esprima` to split HTML with embedded JavaScript into JS (`*_extracted.js`) and HTML (`*_extracted.html`) components, avoiding complex regular expression based parsing.
   * **Lexical Scope Protection:** Features two-phase variables tracking alongside built-in Web-API whitelist checks to accurately surface scope leaks and global variable mutations across deeply nested callback contexts.
