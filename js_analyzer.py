@@ -28,6 +28,34 @@ def extract_parameter_names(params_list):
             names.append(p.left.name)
     return names
 
+
+# ADVANCED MULTI-LINE WHITESPACE & OVERLAP REPAIR
+# The ZEEWEII / DSO2512G title bar relies on exact &nbsp; paddings for horizontal
+# alignment. BeautifulSoup (prettify / str) turns &nbsp; into U+00A0 and, worse,
+# strips the *leading* padding (U+00A0 counts as whitespace) while splitting the
+# spans across indented lines. This restores the title to its exact original
+# single-line, &nbsp;-padded form. It matches BOTH fragmentations:
+#   * app.html            -> str(soup): the spans are (near) single-line
+#   * app_clean.html      -> str(soup)/prettify: the spans are multi-line & indented
+# so the same repair works whether js_analyzer is fed the raw app or the cleaned app.
+TITLE_CANONICAL = (
+    '<span class="title-text-2">&nbsp;ZEEWEII</span>'
+    '<span id="title-text">&nbsp; &nbsp; &nbsp; &nbsp; &nbsp;&nbsp; DSO<span class="colored-text">2512</span>G &nbsp;─────────────────────────────</span>'
+    '<span class="title-text-2">&nbsp;2 CHANNEL DIGITAL OSCILLOSCOPE &nbsp;·&nbsp; <span id="text-120">120</span> MHz &nbsp;·&nbsp; 200 MSa/s</span>'
+)
+
+TITLE_PATTERN = re.compile(
+    r'<span class="title-text-2">\s*ZEEWEII\s*</span>\s*'
+    r'<span id="title-text">\s*DSO\s*<span class="colored-text">\s*2512\s*</span>\s*G\s*─+\s*</span>\s*'
+    r'<span class="title-text-2">\s*2 CHANNEL DIGITAL OSCILLOSCOPE[\s\S]*?200 MSa/s\s*</span>'
+)
+
+def repair_title_layout(html):
+    """Snap the fragmented ZEEWEII/DSO2512G title block back to its exact original
+    single-line &nbsp;-padded layout. Uses a function replacement so the literal
+    canonical text (box-drawing chars, etc.) is inserted verbatim."""
+    return TITLE_PATTERN.sub(lambda m: TITLE_CANONICAL, html)
+
 def analyze_html_js():
     parser = argparse.ArgumentParser(
         description="AST-based structural JavaScript analysis for legacy markup modules with safe export workflows."
@@ -42,7 +70,8 @@ def analyze_html_js():
     parser.add_argument("-c", action="store_true", help="Count and output classes only")
     parser.add_argument("-g", action="store_true", help="Track global variable mutations inside scopes")
     parser.add_argument("-e", action="store_true", help="Extract JS and HTML to separate external assets")
-    
+    parser.add_argument("--clean", action="store_true", help="Clean & pretty-print the HTML (jsbeautifier + CSS tidy + prettify, like html_cleaner.py) with the title layout repaired; writes <base>_clean.html")
+
     args = parser.parse_args()
     
     if not os.path.exists(args.input_file):
@@ -359,22 +388,10 @@ def analyze_html_js():
         
         # Convert soup tree layout to a string
         final_html_output = str(soup)
-        
-        # ADVANCED MULTI-LINE WHITESPACE & OVERLAP REPAIR
-        # Captures the fragmented ZEEWEII and DSO block layout and snaps them back 
-        # together on a single horizontal line containing your exact original non-breaking space paddings.
-        dso_layout_pattern = (
-            r'<\s*span\s+class="title-text-2">\s*ZEEWEII\s*<\s*/\s*span\s*>\s*'
-            r'<\s*span\s+id="title-text">\s*DSO<span class="colored-text">2512</span>G\s* ─────────────────────────────\s*<\s*/\s*span\s*>'
-        )
-        
-        restored_dso_structure = (
-            '<span class="title-text-2">&nbsp;ZEEWEII</span>'
-            '<span id="title-text">&nbsp; &nbsp; &nbsp; &nbsp; &nbsp;&nbsp; DSO<span class="colored-text">2512</span>G &nbsp;─────────────────────────────</span>'
-        )
-        
-        final_html_output = re.sub(dso_layout_pattern, restored_dso_structure, final_html_output, flags=re.DOTALL)
-        
+
+        # Restore the delicate title-bar layout lost during parsing (see repair_title_layout).
+        final_html_output = repair_title_layout(final_html_output)
+
         # Write structural outputs
         with open(out_js_path, 'w', encoding='utf-8') as js_f:
             js_f.write(final_js_content)
@@ -385,6 +402,55 @@ def analyze_html_js():
         print(f"=== EXTRACTION COMPLETE ===")
         print(f"-> JavaScript source asset saved to: {out_js_path}")
         print(f"-> Parsed structural HTML layout saved to: {out_html_path}\n")
+
+    # 3. HTML Cleaning / Pretty-Printing Engine (--clean)
+    # Superset of html_cleaner.py: beautifies inline JS, tidies <style> CSS, prettifies
+    # the document, and additionally repairs the delicate title-bar layout (which plain
+    # prettify would leave broken). Writes <base>_clean.html (e.g. app.html -> app_clean.html).
+    if args.clean:
+        try:
+            import jsbeautifier
+        except ImportError:
+            print("Error: --clean requires the 'jsbeautifier' package (pip install jsbeautifier).")
+            return
+
+        clean_soup = BeautifulSoup(html_content, 'html.parser')
+
+        # Beautify inline <script> blocks (skip external src references).
+        js_options = jsbeautifier.default_options()
+        js_options.indent_size = 4
+        js_options.indent_with_tabs = False
+        js_options.space_in_empty_paren = False
+        js_options.compact = True
+        for script_tag in clean_soup.find_all('script'):
+            if script_tag.string and script_tag.string.strip():
+                try:
+                    cleaned_js = jsbeautifier.beautify(script_tag.string, js_options)
+                    script_tag.string = f"\n{cleaned_js}\n"
+                except Exception as e:
+                    print(f"Warning: Could not beautify a script block due to: {e}")
+
+        # Tidy <style> blocks: expand tabs, drop trailing whitespace and blank lines.
+        for style_tag in clean_soup.find_all('style'):
+            if style_tag.string and style_tag.string.strip():
+                style_lines = []
+                for line in style_tag.string.splitlines():
+                    cleaned_line = line.replace('\t', '    ').rstrip()
+                    if cleaned_line.strip() == "":
+                        continue
+                    style_lines.append(cleaned_line)
+                style_tag.string = "\n" + "\n".join(style_lines) + "\n"
+
+        cleaned_output = clean_soup.prettify()
+        cleaned_output = repair_title_layout(cleaned_output)
+
+        base_name, _ = os.path.splitext(args.input_file)
+        out_clean_path = f"{base_name}_clean.html"
+        with open(out_clean_path, 'w', encoding='utf-8') as out_f:
+            out_f.write(cleaned_output)
+
+        print(f"=== CLEAN COMPLETE ===")
+        print(f"-> Cleaned & repaired HTML written to: {out_clean_path}\n")
 
 if __name__ == '__main__':
     analyze_html_js()
