@@ -56,6 +56,44 @@ def repair_title_layout(html):
     canonical text (box-drawing chars, etc.) is inserted verbatim."""
     return TITLE_PATTERN.sub(lambda m: TITLE_CANONICAL, html)
 
+
+def clean_html_document(html_content):
+    """Return a cleaned, pretty-printed copy of html_content: beautify inline JS,
+    tidy <style> CSS, prettify the document, and repair the delicate title layout.
+    Requires 'jsbeautifier'. Mirrors html_cleaner.py plus the title repair."""
+    import jsbeautifier
+    soup = BeautifulSoup(html_content, 'html.parser')
+
+    # Beautify inline <script> blocks (skip external src references).
+    js_options = jsbeautifier.default_options()
+    js_options.indent_size = 4
+    js_options.indent_with_tabs = False
+    js_options.space_in_empty_paren = False
+    js_options.compact = True
+    for script_tag in soup.find_all('script'):
+        if script_tag.string and script_tag.string.strip():
+            try:
+                cleaned_js = jsbeautifier.beautify(script_tag.string, js_options)
+                script_tag.string = f"\n{cleaned_js}\n"
+            except Exception as e:
+                print(f"Warning: Could not beautify a script block due to: {e}")
+
+    # Tidy <style> blocks: expand tabs, drop trailing whitespace and blank lines.
+    for style_tag in soup.find_all('style'):
+        if style_tag.string and style_tag.string.strip():
+            style_lines = []
+            for line in style_tag.string.splitlines():
+                cleaned_line = line.replace('\t', '    ').rstrip()
+                if cleaned_line.strip() == "":
+                    continue
+                style_lines.append(cleaned_line)
+            style_tag.string = "\n" + "\n".join(style_lines) + "\n"
+
+    cleaned = soup.prettify()
+    cleaned = repair_title_layout(cleaned)
+    return cleaned
+
+
 def analyze_html_js():
     parser = argparse.ArgumentParser(
         description="AST-based structural JavaScript analysis for legacy markup modules with safe export workflows."
@@ -69,8 +107,8 @@ def analyze_html_js():
     parser.add_argument("-v", action="store_true", help="Count and output variables only")
     parser.add_argument("-c", action="store_true", help="Count and output classes only")
     parser.add_argument("-g", action="store_true", help="Track global variable mutations inside scopes")
-    parser.add_argument("-e", action="store_true", help="Extract JS and HTML to separate external assets")
-    parser.add_argument("--clean", action="store_true", help="Clean & pretty-print the HTML (jsbeautifier + CSS tidy + prettify, like html_cleaner.py) with the title layout repaired; writes <base>_clean.html")
+    parser.add_argument("-e", action="store_true", help="Extract JS/HTML to <input_file>_extracted.js and <input_file>_extracted.html")
+    parser.add_argument("--clean", action="store_true", help="Clean & pretty-print (jsbeautifier + CSS tidy + prettify) to <input_file>_clean.html FIRST, then run the report and -e on that cleaned file")
 
     args = parser.parse_args()
     
@@ -80,6 +118,24 @@ def analyze_html_js():
 
     with open(args.input_file, 'r', encoding='utf-8') as f:
         html_content = f.read()
+
+    # If --clean is set, clean/pretty-print FIRST and run every subsequent step
+    # (report, -e) on the cleaned document as the new input.
+    if args.clean:
+        try:
+            cleaned_output = clean_html_document(html_content)
+        except ImportError:
+            print("Error: --clean requires the 'jsbeautifier' package (pip install jsbeautifier).")
+            return
+        base_name, _ = os.path.splitext(args.input_file)
+        out_clean_path = f"{base_name}_clean.html"
+        with open(out_clean_path, 'w', encoding='utf-8') as out_f:
+            out_f.write(cleaned_output)
+        print("=== CLEAN COMPLETE ===")
+        print(f"-> Cleaned & repaired HTML written to: {out_clean_path}\n")
+        # Continue with the cleaned file as the new input for the report and -e.
+        html_content = cleaned_output
+        args.input_file = out_clean_path
     
     # 1. Handle the Extraction Prompt Early if -e is used
     script_matches = list(re.finditer(r'<script\b[^>]*>(.*?)</script>', html_content, re.DOTALL | re.IGNORECASE))
@@ -403,54 +459,6 @@ def analyze_html_js():
         print(f"-> JavaScript source asset saved to: {out_js_path}")
         print(f"-> Parsed structural HTML layout saved to: {out_html_path}\n")
 
-    # 3. HTML Cleaning / Pretty-Printing Engine (--clean)
-    # Superset of html_cleaner.py: beautifies inline JS, tidies <style> CSS, prettifies
-    # the document, and additionally repairs the delicate title-bar layout (which plain
-    # prettify would leave broken). Writes <base>_clean.html (e.g. app.html -> app_clean.html).
-    if args.clean:
-        try:
-            import jsbeautifier
-        except ImportError:
-            print("Error: --clean requires the 'jsbeautifier' package (pip install jsbeautifier).")
-            return
-
-        clean_soup = BeautifulSoup(html_content, 'html.parser')
-
-        # Beautify inline <script> blocks (skip external src references).
-        js_options = jsbeautifier.default_options()
-        js_options.indent_size = 4
-        js_options.indent_with_tabs = False
-        js_options.space_in_empty_paren = False
-        js_options.compact = True
-        for script_tag in clean_soup.find_all('script'):
-            if script_tag.string and script_tag.string.strip():
-                try:
-                    cleaned_js = jsbeautifier.beautify(script_tag.string, js_options)
-                    script_tag.string = f"\n{cleaned_js}\n"
-                except Exception as e:
-                    print(f"Warning: Could not beautify a script block due to: {e}")
-
-        # Tidy <style> blocks: expand tabs, drop trailing whitespace and blank lines.
-        for style_tag in clean_soup.find_all('style'):
-            if style_tag.string and style_tag.string.strip():
-                style_lines = []
-                for line in style_tag.string.splitlines():
-                    cleaned_line = line.replace('\t', '    ').rstrip()
-                    if cleaned_line.strip() == "":
-                        continue
-                    style_lines.append(cleaned_line)
-                style_tag.string = "\n" + "\n".join(style_lines) + "\n"
-
-        cleaned_output = clean_soup.prettify()
-        cleaned_output = repair_title_layout(cleaned_output)
-
-        base_name, _ = os.path.splitext(args.input_file)
-        out_clean_path = f"{base_name}_clean.html"
-        with open(out_clean_path, 'w', encoding='utf-8') as out_f:
-            out_f.write(cleaned_output)
-
-        print(f"=== CLEAN COMPLETE ===")
-        print(f"-> Cleaned & repaired HTML written to: {out_clean_path}\n")
 
 if __name__ == '__main__':
     analyze_html_js()

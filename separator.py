@@ -2,12 +2,21 @@ import os
 import esprima
 from bs4 import BeautifulSoup
 
-def analyze_and_separate_assets(input_file, output_js_file="extracted_code.js", report_file="js_analysis.txt"):
+def analyze_and_separate_assets(input_file, output_html_file=None, output_js_file=None, report_file=None):
     print("=== STARTING ADVANCED AST-BASED JS ANALYSIS AND SEPARATION ===")
-    
+
     if not os.path.exists(input_file):
         print(f"Error: Input file '{input_file}' not found.")
         return
+
+    # Derive output names from the input file (e.g. page.html -> page_extracted.html/.js, page_report.txt)
+    base_name = os.path.splitext(input_file)[0]
+    if output_html_file is None:
+        output_html_file = f"{base_name}_extracted.html"
+    if output_js_file is None:
+        output_js_file = f"{base_name}_extracted.js"
+    if report_file is None:
+        report_file = f"{base_name}_report.txt"
 
     with open(input_file, 'r', encoding='utf-8') as f:
         html_content = f.read()
@@ -25,7 +34,7 @@ def analyze_and_separate_assets(input_file, output_js_file="extracted_code.js", 
     combined_js = "\n\n/* --- NEXT SCRIPT BLOCK --- */\n\n".join(js_blocks)
 
     # Save clean HTML without embedded JS
-    with open("app_pure_structure.html", 'w', encoding='utf-8') as html_f:
+    with open(output_html_file, 'w', encoding='utf-8') as html_f:
         html_f.write(str(soup))
         
     # Save JS part separately
@@ -124,10 +133,16 @@ def analyze_and_separate_assets(input_file, output_js_file="extracted_code.js", 
                 rep_f.write(f"  • Inputs/Parameters: {', '.join(elem['inputs']) if elem['inputs'] else 'None'}\n")
                 rep_f.write(f"  • Has Output/Return : {elem['output']}\n\n")
 
-    print(f"Separated structural HTML saved to: 'app_pure_structure.html'")
+    print(f"Separated structural HTML saved to: '{output_html_file}'")
     print(f"Extracted underlying JS code saved to: '{output_js_file}'")
     print(f"Comprehensive architectural report saved to: '{report_file}'\n")
 
 if __name__ == '__main__':
-    analyze_and_separate_assets("app.html")
+    import argparse
+    ap = argparse.ArgumentParser(
+        description="Separate an HTML file into structure + JS and write an analysis report.")
+    ap.add_argument("input_file", nargs="?", default="app.html",
+                    help="HTML file to process (default: app.html)")
+    args = ap.parse_args()
+    analyze_and_separate_assets(args.input_file)
 
